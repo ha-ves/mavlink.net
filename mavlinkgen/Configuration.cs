@@ -47,8 +47,6 @@ namespace MavLinkGen
             }
         }
 
-
-
         public Configuration(string[] args)
         {
             Parse(args);
@@ -87,6 +85,18 @@ namespace MavLinkGen
             }
         }
 
+        public WireProtocolVersion GetWireProtocolVersion()
+        {
+            switch (GetOption("version").ToLower())
+            {
+                case "v10":
+                    return WireProtocolVersion.v10;
+                case "v20":
+                    return WireProtocolVersion.v20;
+                default:
+                    return WireProtocolVersion.v10;
+            }
+        }
         // __ Impl ____________________________________________________________
 
 

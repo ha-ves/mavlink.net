@@ -43,8 +43,15 @@ namespace MavLinkObjectGenerator
         NONE
     };
 
+    public enum WireProtocolVersion
+    {
+        v10,
+        v20
+    };
+
     public class ProtocolData
     {
+        public WireProtocolVersion ProtocolVersion;
         public int Version;
         public Dictionary<string, EnumData> Enumerations = new Dictionary<string, EnumData>();
         public Dictionary<string, MessageData> Messages = new Dictionary<string, MessageData>();
@@ -65,11 +72,57 @@ namespace MavLinkObjectGenerator
     [DebuggerDisplay("{Name}: [type: {TypeString}] [enum: {EnumType}]")]
     public class FieldData : ProtocolObject
     {
+        public bool IsExtension;
         public string TypeString;
         public FieldDataType Type;
         public int NumElements;
         public bool IsEnum = false;
         public string EnumType;
+
+        public uint GetSize()
+        {
+            uint sizeOfType = 0;
+
+            switch (Type)
+            {
+                case FieldDataType.CHAR:
+                case FieldDataType.INT8:
+                case FieldDataType.UINT8:
+                    sizeOfType = sizeof(char);
+                    break;
+                case FieldDataType.INT16:
+                    sizeOfType = sizeof(Int16);
+                    break;
+                case FieldDataType.INT32:
+                    sizeOfType = sizeof(Int32);
+                    break;
+                case FieldDataType.INT64:
+                    sizeOfType = sizeof(Int64);
+                    break;
+                case FieldDataType.UINT16:
+                    sizeOfType = sizeof(UInt16);
+                    break;
+                case FieldDataType.UINT32:
+                    sizeOfType = sizeof(UInt32);
+                    break;
+                case FieldDataType.FLOAT32:
+                    sizeOfType = sizeof(float);
+                    break;
+                case FieldDataType.UINT64:
+                    sizeOfType = sizeof(UInt64);
+                    break;
+                case FieldDataType.DOUBLE:
+                    sizeOfType = sizeof(double);
+                    break;
+                case FieldDataType.NONE:
+                    sizeOfType = 0;
+                    break;
+                default:
+                    throw new NotImplementedException();
+            }
+
+            return sizeOfType;
+        }
     }
 
     public class EnumData : ProtocolObject

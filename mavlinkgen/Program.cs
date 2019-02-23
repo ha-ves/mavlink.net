@@ -41,7 +41,7 @@ namespace MavLinkGen
                 {
                     try
                     {
-                        new XmlParser(file).Generate(c.OutputFile, c.GetGenerator());
+                        new XmlParser(file).Generate(c.OutputFile, c.GetGenerator(), c.GetWireProtocolVersion());
                     }
                     catch (Exception ex)
                     {

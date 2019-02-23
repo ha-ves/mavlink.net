@@ -9,6 +9,7 @@ namespace MavLinkNet
     {
         public byte MavlinkSystemId = 200;
         public byte MavlinkComponentId = 1;
+        public byte PacketSignalByte = byte.MinValue;
         public MavLinkState UavState = new MavLinkState();
 
         public event PacketReceivedDelegate OnPacketReceived;
@@ -19,11 +20,26 @@ namespace MavLinkNet
         public abstract void SendMessage(UasMessage msg);
         //public abstract void SendRawPacket(MavLinkPacket packet);
 
+        public void InitializeProtocolVersion(WireProtocolVersion wireProtocolVersion)
+        {
+            switch (wireProtocolVersion)
+            {
+                case WireProtocolVersion.v10:
+                    MavLinkAsyncWalker.PacketSignalByte = 0xFE;
+                    break;
+                case WireProtocolVersion.v20:
+                    MavLinkAsyncWalker.PacketSignalByte = 0xFD;
+                    break;
+                default:
+
+                    break;
+            }
+        }
 
         // __ MavLink events __________________________________________________
 
 
-        protected void HandlePacketReceived(object sender, MavLinkPacket e)
+        protected void HandlePacketReceived(object sender, MavLinkPacketBase e)
         {
             if (OnPacketReceived != null) OnPacketReceived(sender, e);
         }

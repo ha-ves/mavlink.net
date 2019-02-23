@@ -1,16 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 
 namespace MavLinkNet
 {
-    public delegate void PacketReceivedDelegate(object sender, MavLinkPacket packet);
+    public delegate void PacketReceivedDelegate(object sender, MavLinkPacketBase packet);
 
 
     public abstract class MavLinkGenericPacketWalker
     {
-        public const byte PacketSignalByte = 0xFE;
+        public static readonly IList<byte> PacketSignalBytes = new ReadOnlyCollection<byte>
+            (new List<byte>
+                {
+                    0xFE,
+                    0xFD
+                });
+
+        public static byte PacketSignalByte = byte.MinValue;
 
         /// <summary>
         /// Event raised everytime a packet is received. This event is synchronous, 
@@ -48,22 +56,32 @@ namespace MavLinkNet
         {
             byte mark = includeSignalMark ? PacketSignalByte : (byte)0;
 
-            return MavLinkPacket.GetBytesForMessage(
-                      msg, systemId, componentId, sequenceNumber, mark);
+            switch(PacketSignalByte)
+            {
+                case 0xFE:
+                    return MavLinkPacketV10.GetBytesForMessage(
+                         msg, systemId, componentId, sequenceNumber, mark);
+
+                case 0xFD:
+                    return MavLinkPacketV20.GetBytesForMessage(
+                              msg, systemId, componentId, sequenceNumber, mark);
+                default:
+                    return new byte[] { byte.MinValue };
+            }
         }
 
 
         // __ Impl ____________________________________________________________
 
 
-        protected void NotifyPacketReceived(MavLinkPacket packet)
+        protected void NotifyPacketReceived(MavLinkPacketBase packet)
         {
             if (packet == null || PacketReceived == null) return;
 
             PacketReceived(this, packet);
         }
 
-        protected void NotifyPacketDiscarded(MavLinkPacket packet)
+        protected void NotifyPacketDiscarded(MavLinkPacketBase packet)
         {
             if (packet == null || PacketDiscarded == null) return;
 

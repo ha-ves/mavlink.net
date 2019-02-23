@@ -23,6 +23,7 @@ THE SOFTWARE.
 */
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Collections.Generic;
 
@@ -131,7 +132,7 @@ namespace MavLinkObjectGenerator
 
         private void WriteSummaryCreateFromId()
         {
-            WL("        public static UasMessage CreateFromId(byte id)");
+            WL("        public static UasMessage CreateFromId({0} id)", GetProtocolMessageIdType(mProtocolData.ProtocolVersion));
             WL("        {");
             WL("            switch (id)");
             WL("            {");
@@ -148,7 +149,7 @@ namespace MavLinkObjectGenerator
 
         private void WriteSummaryGetCrc()
         {
-            WL("        public static byte GetCrcExtraForId(byte id)");
+            WL("        public static byte GetCrcExtraForId({0} id)", GetProtocolMessageIdType(mProtocolData.ProtocolVersion));
             WL("        {");
             WL("            switch (id)");
             WL("            {");
@@ -245,6 +246,14 @@ namespace MavLinkObjectGenerator
        
         private void WriteProperties(MessageData m)
         {
+            WL("        /// <summary>");
+            WL("        /// Message packet size");
+            WL("        /// </summary>");
+
+            WL("        public override uint PacketSize {");
+            WL("            get {{ return {0}; }}", GetPacketSize(m.Fields));
+            WL("        }");
+
             foreach (FieldData f in m.Fields)
             {
                 if (f.Description != null)
@@ -274,23 +283,48 @@ namespace MavLinkObjectGenerator
 
         private void WriteSerialize(MessageData m)
         {
-            WL("        internal override void SerializeBody(BinaryWriter s)");
+            List<Action> writeExtensions = new List<Action>();
+
+            WL("        internal override void SerializeBody(BinaryWriter s, WireProtocolVersion wireProtocolVersion)");
             WL("        {");
 
             foreach (FieldData f in m.Fields)
             {
                 if (f.NumElements <= 1)
                 {
-                    WL("            s.Write({0}{1});", GetSerializeTypeCast(f), GetPrivateFieldName(f));
+                    if (!f.IsExtension)
+                        WL("            s.Write({0}{1});", GetSerializeTypeCast(f), GetPrivateFieldName(f));
+                    else
+                        writeExtensions.Add(()=>
+                            WL("                s.Write({0}{1});", GetSerializeTypeCast(f), GetPrivateFieldName(f)));
                 }
                 else
                 {
                     for (int i = 0; i < f.NumElements; ++i)
                     {
-                        WL("            s.Write({0}{1}[{2}]); ",
-                           GetSerializeTypeCast(f), GetPrivateFieldName(f), i);
+                        var index = i;
+                        if (!f.IsExtension)
+                            WL("            s.Write({0}{1}[{2}]); ",
+                                GetSerializeTypeCast(f), GetPrivateFieldName(f), i);
+                        else
+                            writeExtensions.Add(() =>
+                                WL("                s.Write({0}{1}[{2}]); ",
+                                    GetSerializeTypeCast(f), GetPrivateFieldName(f), index));
+
                     }
                 }
+            }
+
+            if (writeExtensions.Count > 0)
+            {
+                WL("");
+                WL("            if(wireProtocolVersion==WireProtocolVersion.v20)");
+                WL("            {");
+                    foreach (var writeExtension in writeExtensions)
+                    {
+                        writeExtension();
+                    }
+                WL("            }");
             }
 
             WL("        }");
@@ -299,7 +333,10 @@ namespace MavLinkObjectGenerator
 
         private void WriteDeserialize(MessageData m)
         {
-            WL("        internal override void DeserializeBody(BinaryReader s)");
+            List<Action> writeExtensions = new List<Action>();
+
+            WL("        internal override void DeserializeBody(BinaryReader s, WireProtocolVersion wireProtocolVersion)");
+
             WL("        {");
 
             foreach (FieldData f in m.Fields)
@@ -307,18 +344,41 @@ namespace MavLinkObjectGenerator
                 int numElements = f.NumElements;
 
                 if (numElements <= 1)
-                {
-                    WL("            this.{0} = {1}s.{2}();",
-                       GetPrivateFieldName(f), GetEnumTypeCast(f), GetReadOperation(f));
+                {                    
+                    if(!f.IsExtension)
+                        WL("            this.{0} = {1}s.{2}();",
+                            GetPrivateFieldName(f), GetEnumTypeCast(f), GetReadOperation(f));
+                    else
+                        writeExtensions.Add(()=>
+                            WL("                this.{0} = {1}s.{2}();",
+                                GetPrivateFieldName(f), GetEnumTypeCast(f), GetReadOperation(f)));
                 }
                 else
                 {
                     for (int i = 0; i < numElements; ++i)
                     {
-                        WL("            this.{0}[{1}] = {2}s.{3}();",
-                           GetPrivateFieldName(f), i, GetEnumTypeCast(f), GetReadOperation(f));
+                        var index = i;
+                        if (!f.IsExtension)
+                            WL("            this.{0}[{1}] = {2}s.{3}();",
+                                GetPrivateFieldName(f), i, GetEnumTypeCast(f), GetReadOperation(f));
+                        else
+                            writeExtensions.Add(() =>
+                                WL("                this.{0}[{1}] = {2}s.{3}();",
+                                    GetPrivateFieldName(f), index, GetEnumTypeCast(f), GetReadOperation(f)));
                     }
                 }
+            }
+
+            if (writeExtensions.Count > 0)
+            {
+                WL("");
+                WL("            if(wireProtocolVersion==WireProtocolVersion.v20)");
+                WL("            {");
+                    foreach (var writeExtension in writeExtensions)
+                    {
+                        writeExtension();
+                    }
+                WL("            }");
             }
 
             WL("        }");
@@ -567,6 +627,11 @@ namespace MavLinkObjectGenerator
             }
         }
 
+        private static string GetPacketSize(IList<FieldData> fields)
+        {
+            return fields.Sum(f =>f.GetSize() * f.NumElements).ToString();
+        }
+
         private static string GetPrivateFieldName(FieldData f)
         {
             return string.Format("m{0}", Utils.GetPascalStyleString(f.Name));
@@ -577,6 +642,16 @@ namespace MavLinkObjectGenerator
             if (comment == null) return "";
             
             return comment.Replace('\n', ' ').Replace('\r', ' ').Replace('"', '\'');
+        }
+
+        private static string GetProtocolSuffix(WireProtocolVersion protocolVersion)
+        {
+            return protocolVersion == WireProtocolVersion.v10 ? "V10" : "V20";
+        }
+
+        private static string GetProtocolMessageIdType(WireProtocolVersion protocolVersion)
+        {
+            return protocolVersion == WireProtocolVersion.v10 ? "byte" : "uint";
         }
 
         // __ Output __________________________________________________________

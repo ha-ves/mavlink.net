@@ -35,24 +35,27 @@ namespace MavLinkObjectGenerator
             mSourceFileName = fileName;
         }
 
-        public void Generate(string targetFileName, GenericGenerator generator)
+        public void Generate(string targetFileName, GenericGenerator generator, WireProtocolVersion protocolVersion)
         {
             using (XmlTextReader reader = new XmlTextReader(mSourceFileName))
             {
                 using (StreamWriter writer = new StreamWriter(targetFileName))
                 {
-                    Generate(reader, writer, generator);
+                    Generate(reader, writer, generator, protocolVersion);
                 }
             }
         }
 
-        public void Generate(XmlTextReader reader, TextWriter writer, GenericGenerator generator)
+        public void Generate(XmlTextReader reader, TextWriter writer, GenericGenerator generator, WireProtocolVersion protocolVersion)
         {
-            ProtocolData result = new ProtocolData();
+            ProtocolData result = new ProtocolData()
+            {
+                ProtocolVersion = protocolVersion
+            };
+
             Parse(reader, result);
             generator.Write(result, writer);
         }
-
 
         // __ Impl _______________________________________________________
 
@@ -66,6 +69,8 @@ namespace MavLinkObjectGenerator
             EnumEntry currentEntry = null;
             EnumEntryParameter currentParam = null;
             int currentEnumValue = 0;
+            bool endOfV10Definition = false;
+            bool markNextFieldAsExtension = false;
 
             while (reader.Read())
             {
@@ -80,25 +85,42 @@ namespace MavLinkObjectGenerator
                             result.Version = reader.ReadElementContentAsInt();
                             break;
                         case "message":
-                             // if (currentMsg != null) SortFields(currentMsg);   //<--- if condition deleted 
+                            // if (currentMsg != null) SortFields(currentMsg);   //<--- if condition deleted 
+                            endOfV10Definition = false;
+                            markNextFieldAsExtension = false;
                             currentMsg = new MessageData();
                             currentObject = currentMsg;
                             currentMsg.Name = reader.GetAttribute("name");
                             currentMsg.Id = GetIntFromString(reader.GetAttribute("id"));
-                            if (currentMsg.Id < 256)    // Msg id field is a byte, discard anything beyond 255
-                                result.Messages.Add(currentMsg.Name, currentMsg);
+
+                            switch (result.ProtocolVersion)
+                            {
+                                case WireProtocolVersion.v10:
+                                    if (currentMsg.Id < 256)    // Msg id field is a byte, discard anything beyond 255
+                                        result.Messages.Add(currentMsg.Name, currentMsg);
+                                    break;
+                                case WireProtocolVersion.v20:
+                                    if (currentMsg.Id < 0x1000000)    // Msg id field is a uint 24 bits, discard anything beyond 16777215
+                                        result.Messages.Add(currentMsg.Name, currentMsg);
+                                    break;
+                            }
+
                             break;
                         case "description": 
                             currentObject.Description = reader.ReadString();
                             break;
                         case "field":
+                            if (endOfV10Definition)
+                                break;
+
                             currentField = new FieldData();
+                            currentField.IsExtension = markNextFieldAsExtension;
                             currentField.Name = reader.GetAttribute("name");
                             currentField.TypeString = reader.GetAttribute("type");
                             currentField.Type = GetFieldTypeFromString(currentField.TypeString);
-                            currentField.NumElements = GetFieldTypeNumElements(currentField.TypeString);
+                            currentField.NumElements = GetFieldTypeNumElements(currentField.TypeString);                            
+                            UpdateEnumFields(result, currentField, reader.GetAttribute("enum"));
                             currentField.Description = reader.ReadElementContentAsString();
-                            UpdateEnumFields(result, currentField);
                             currentMsg.Fields.Add(currentField);
                             break;
                         case "enum":
@@ -120,6 +142,13 @@ namespace MavLinkObjectGenerator
                             currentParam.Index = GetIntFromString(reader.GetAttribute("index"));
                             currentParam.Description = reader.ReadElementContentAsString();
                             currentEntry.Parameters.Add(currentParam);
+                            break;
+                        case "extensions":
+                            endOfV10Definition = result.ProtocolVersion == WireProtocolVersion.v10;
+                            markNextFieldAsExtension = true;
+                            break;
+                        default:
+                            //Console.WriteLine(reader.Name);
                             break;
                     }
                 }
@@ -266,17 +295,24 @@ namespace MavLinkObjectGenerator
             obj.Fields = result;
         }
 
-        private static void UpdateEnumFields(ProtocolData data, FieldData field)
+        private static void UpdateEnumFields(ProtocolData data, FieldData field, string enumType)
         {
-            foreach (string s in data.Enumerations.Keys)
+            if (enumType != null && data.Enumerations.ContainsKey(enumType))
             {
-                if (field.Description.IndexOf(s) != -1 && field.Type != FieldDataType.FLOAT32)
-                {
-                    field.IsEnum = true;
-                    field.EnumType = s;
-                    return;
-                }
+                field.IsEnum = true;
+                field.EnumType = enumType;
+                return;
             }
+
+            //foreach (var s in data.Enumerations.Keys)
+            //{
+            //    if (field.Description.IndexOf(s) != -1 && field.Type != FieldDataType.FLOAT32)
+            //    {
+            //        field.IsEnum = true;
+            //        field.EnumType = s;
+            //        return;
+            //    }
+            //}
         }
 
         

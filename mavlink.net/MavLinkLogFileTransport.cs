@@ -43,8 +43,22 @@ namespace MavLinkNet
                     {
                         while (true)
                         {
-                            SyncStream(reader);
-                            MavLinkPacket packet = MavLinkPacket.Deserialize(reader, 0);
+                            MavLinkPacketBase packet = null;
+                            switch (SyncStream(reader))
+                            {
+                                case 0xFE:
+                                    PacketSignalByte = 0xFE;
+                                    packet = MavLinkPacketV10.Deserialize(reader, 0);
+                                    break;
+
+                                case 0xFD:
+                                    PacketSignalByte = 0xFD;
+                                    packet = MavLinkPacketV20.Deserialize(reader, 0);
+                                    break;
+
+                                default:
+                                    break;
+                            }
 
                             if (packet.IsValid)
                             {
@@ -62,12 +76,16 @@ namespace MavLinkNet
             HandleReceptionEnded(this);
         }
 
-        private void SyncStream(BinaryReader s)
+        private byte SyncStream(BinaryReader s)
         {
-            while (s.ReadByte() != MavLinkGenericPacketWalker.PacketSignalByte)
+            byte delimiter = byte.MinValue;
+            do
             {
                 // Skip bytes until a packet start is found
-            }
+                delimiter = s.ReadByte();
+            } while (!MavLinkGenericPacketWalker.PacketSignalBytes.Contains(delimiter));
+            
+            return delimiter;
         }
     }
 }

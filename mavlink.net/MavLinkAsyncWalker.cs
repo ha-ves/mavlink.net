@@ -64,14 +64,29 @@ namespace MavLinkNet
 
         private void PacketProcessingWorker(object state)
         {
-            using (BinaryReader reader = MavLinkPacket.GetBinaryReader(mProcessStream))
+            using (BinaryReader reader = MavLinkPacketBase.GetBinaryReader(mProcessStream))
             {
                 while (true)
                 {
-                    SyncStream(reader);
-                    MavLinkPacket packet = MavLinkPacket.Deserialize(reader, 0);
+                    MavLinkPacketBase packet = null;
+                    switch (SyncStream(reader))
+                    {
+                        case 0xFE:
+                            PacketSignalByte = 0xFE;
+                            packet = MavLinkPacketV10.Deserialize(reader, 0);                             
+                            break;
 
-                    if (packet.IsValid)
+                        case 0xFD:
+                            PacketSignalByte = 0xFD;
+                             packet = MavLinkPacketV20.Deserialize(reader, 0);
+                            break;
+
+                        default:
+                            break;
+                    }
+                    
+
+                    if (packet != null && packet.IsValid)
                     {
                         NotifyPacketReceived(packet);
                     }
@@ -83,12 +98,16 @@ namespace MavLinkNet
             }
         }
 
-        private void SyncStream(BinaryReader s)
+        private byte SyncStream(BinaryReader s)
         {
-            while (s.ReadByte() != PacketSignalByte)
+            byte delimiter = byte.MinValue;
+            do
             {
                 // Skip bytes until a packet start is found
-            }
+                delimiter = s.ReadByte();
+            } while (!PacketSignalBytes.Contains(delimiter));
+
+            return delimiter;
         }
     }
 }

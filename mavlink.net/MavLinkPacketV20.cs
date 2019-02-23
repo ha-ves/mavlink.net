@@ -1,7 +1,7 @@
 ﻿/*
 The MIT License (MIT)
 
-Copyright (c) 2013, David Suarez
+Copyright (c) 2019, Mikael Ferland
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,22 +27,12 @@ using System.Text;
 
 namespace MavLinkNet
 {
-    public class MavLinkPacket
+    public class MavLinkPacketV20 : MavLinkPacketBase
     {
-        public const int PacketOverheadNumBytes = 7;
+        public const int PacketOverheadNumBytes = 10;
 
-        public bool IsValid = false;
-
-        public byte PayLoadLength;
-        public byte PacketSequenceNumber;
-        public byte SystemId;
-        public byte ComponentId;
-        public byte MessageId;
-        public byte[] Payload;
-        public byte Checksum1;
-        public byte Checksum2;
-
-        public UasMessage Message;
+        public byte IncompatibilityFlags;
+        public byte CompatibilityFlags;
 
         // __ Deserialization _________________________________________________
 
@@ -51,24 +41,30 @@ namespace MavLinkNet
          * 
          * 0  Packet start sign	
          * 1	 Payload length	 0 - 255
-         * 2	 Packet sequence	 0 - 255
-         * 3	 System ID	 1 - 255
-         * 4	 Component ID	 0 - 255
-         * 5	 Message ID	 0 - 255
-         * 6 to (n+6)	 Data	 (0 - 255) bytes
-         * (n+7) to (n+8)	 Checksum (high byte, low byte) for v0.9, lowbyte, highbyte for 1.0
-         *
+         * 2     Incompatibility Flags
+         * 3     Compatibility Flags
+         * 4	 Packet sequence	 0 - 255
+         * 5	 System ID	 1 - 255
+         * 6	 Component ID	 0 - 255
+         * 7to9	 Message ID	 0 - 16777215
+         * 10 to (n+10)	 Data	 (0 - 255) bytes
+         * (n+11) to (n+12)	 Checksum (high byte, low byte) for v0.9, lowbyte, highbyte for 1.0 and 2.0
+         * (n+12) to (n+26)  Signature (optional) Not supported for now
          */
-        public static MavLinkPacket Deserialize(BinaryReader s, byte payloadLength)
+        public static MavLinkPacketV20 Deserialize(BinaryReader s, byte payloadLength)
         {
-            MavLinkPacket result = new MavLinkPacket()
+            MavLinkPacketV20 result = new MavLinkPacketV20()
             {
                 PayLoadLength = (payloadLength == 0) ? s.ReadByte() : payloadLength,
+                IncompatibilityFlags = s.ReadByte(),
+                CompatibilityFlags = s.ReadByte(),
                 PacketSequenceNumber = s.ReadByte(),
                 SystemId = s.ReadByte(),
                 ComponentId = s.ReadByte(),
-                MessageId = s.ReadByte(),
+                MessageId = BitConverter.ToUInt32(PadRightByteArray(s.ReadBytes(3)), 0),
             };
+            
+            result.WireProtocolVersion = WireProtocolVersion.v20;
 
             // Read the payload instead of deserializing so we can validate CRC.
             result.Payload = s.ReadBytes(result.PayLoadLength);
@@ -83,7 +79,7 @@ namespace MavLinkNet
             return result;
         }
 
-        public int GetPacketSize()
+        public override int GetPacketSize()
         {
             return PacketOverheadNumBytes + PayLoadLength;
         }
@@ -99,8 +95,12 @@ namespace MavLinkNet
         private void DeserializeMessage()
         {
             UasMessage result = UasSummary.CreateFromId(MessageId);
-
+                        
             if (result == null) return;  // Unknown type
+
+            // Zero-bytes are truncated at the end of the packet
+            // We have to fill the payload in that case otherwise the binary ready will throw exception
+            FillPayloadIfNeeded(result);
 
             using (MemoryStream ms = new MemoryStream(Payload))
             {
@@ -114,19 +114,39 @@ namespace MavLinkNet
             IsValid = true;
         }
 
-        public static BinaryReader GetBinaryReader(Stream s)
+        private static byte[] PadLeftByteArray(byte[] sourceArray)
         {
-            return new BinaryReader(s, Encoding.ASCII);
+            var newArray = new byte[3 + 1];
+            sourceArray.CopyTo(newArray, 1);
+            newArray[0] = 0;
+            return newArray;
         }
 
+        private static byte[] PadRightByteArray(byte[] sourceArray)
+        {
+            var newArray = new byte[3 + 1];
+            sourceArray.CopyTo(newArray, 0);
+            newArray[3] = 0;
+            return newArray;
+        }
+
+        private void FillPayloadIfNeeded(UasMessage message)
+        {
+            if(Payload.Length < message.PacketSize)
+            {
+                var newArray = new byte[message.PacketSize];
+                Payload.CopyTo(newArray, 0);
+                Payload = newArray;
+            }
+        }
 
         // __ Serialization ___________________________________________________
 
 
-        public static MavLinkPacket GetPacketForMessage(
+        public static MavLinkPacketV20 GetPacketForMessage(
             UasMessage msg, byte systemId, byte componentId, byte sequenceNumber)
         {
-            MavLinkPacket result = new MavLinkPacket()
+            MavLinkPacketV20 result = new MavLinkPacketV20()
             {
                 SystemId = systemId,
                 ComponentId = componentId,
@@ -153,7 +173,7 @@ namespace MavLinkNet
         public static byte[] GetBytesForMessage(
             UasMessage msg, byte systemId, byte componentId, byte sequenceNumber, byte signalMark)
         {
-            MavLinkPacket p = MavLinkPacket.GetPacketForMessage(
+            MavLinkPacketV20 p = MavLinkPacketV20.GetPacketForMessage(
                                  msg, systemId, componentId, sequenceNumber);
 
             int bufferSize = p.GetPacketSize();
@@ -173,11 +193,12 @@ namespace MavLinkNet
 
             return result;
         }
-
-
-        public void Serialize(BinaryWriter w)
+                
+        public override void Serialize(BinaryWriter w)
         {
             w.Write(PayLoadLength);
+            w.Write(IncompatibilityFlags);
+            w.Write(CompatibilityFlags);
             w.Write(PacketSequenceNumber);
             w.Write(SystemId);
             w.Write(ComponentId);
@@ -194,15 +215,19 @@ namespace MavLinkNet
             Checksum2 = (byte)(crc >> 8);
         }
 
-        public static UInt16 GetPacketCrc(MavLinkPacket p)
+        public static UInt16 GetPacketCrc(MavLinkPacketV20 p)
         {
             UInt16 crc = X25CrcSeed;
 
             crc = X25CrcAccumulate(p.PayLoadLength, crc);
+            crc = X25CrcAccumulate(p.IncompatibilityFlags, crc);
+            crc = X25CrcAccumulate(p.CompatibilityFlags, crc);
             crc = X25CrcAccumulate(p.PacketSequenceNumber, crc);
             crc = X25CrcAccumulate(p.SystemId, crc);
             crc = X25CrcAccumulate(p.ComponentId, crc);
-            crc = X25CrcAccumulate(p.MessageId, crc);
+            crc = X25CrcAccumulate((byte)(p.MessageId & 0x0000FF), crc);
+            crc = X25CrcAccumulate((byte)((p.MessageId & 0x00FF00) >> 8), crc);
+            crc = X25CrcAccumulate((byte)((p.MessageId & 0xFF0000) >> 16), crc);
 
             for (int i = 0; i < p.Payload.Length; ++i)
             {
@@ -216,21 +241,21 @@ namespace MavLinkNet
 
 
 
-        // __ CRC _____________________________________________________________
+        //// __ CRC _____________________________________________________________
 
 
-        // CRC code adapted from Mavlink C# generator (https://github.com/mavlink/mavlink)
+        //// CRC code adapted from Mavlink C# generator (https://github.com/mavlink/mavlink)
 
-        const UInt16 X25CrcSeed = 0xffff;
+        //const UInt16 X25CrcSeed = 0xffff;
 
-        public static UInt16 X25CrcAccumulate(byte b, UInt16 crc)
-        {
-            unchecked
-            {
-                byte ch = (byte)(b ^ (byte)(crc & 0x00ff));
-                ch = (byte)(ch ^ (ch << 4));
-                return (UInt16)((crc >> 8) ^ (ch << 8) ^ (ch << 3) ^ (ch >> 4));
-            }
-        }
+        //public static UInt16 X25CrcAccumulate(byte b, UInt16 crc)
+        //{
+        //    unchecked
+        //    {
+        //        byte ch = (byte)(b ^ (byte)(crc & 0x00ff));
+        //        ch = (byte)(ch ^ (ch << 4));
+        //        return (UInt16)((crc >> 8) ^ (ch << 8) ^ (ch << 3) ^ (ch >> 4));
+        //    }
+        //}
     }
 }

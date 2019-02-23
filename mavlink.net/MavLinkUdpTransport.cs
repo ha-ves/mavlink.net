@@ -111,6 +111,10 @@ namespace MavLinkNet
             {
                 mIsActive = false;
             }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.Print(ex.Message);
+            }
         }
 
         private void ProcessReceiveQueue(object state)

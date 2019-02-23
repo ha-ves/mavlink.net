@@ -33,6 +33,7 @@ namespace MavLinkNet
         public string SerialPortName = "COM1";
         public int BaudRate = 115200;
         public int HeartBeatUpdateRateMs = 1000;
+        public WireProtocolVersion WireProtocolVersion;
 
         private ConcurrentQueue<byte[]> mReceiveQueue = new ConcurrentQueue<byte[]>();
         private ConcurrentQueue<UasMessage> mSendQueue = new ConcurrentQueue<UasMessage>();
@@ -45,6 +46,7 @@ namespace MavLinkNet
 
         public override void Initialize()
         {
+            InitializeProtocolVersion(WireProtocolVersion);
             InitializeMavLink();
             InitializeSerialPort(SerialPortName);
         }
@@ -59,7 +61,7 @@ namespace MavLinkNet
         }
 
         private void InitializeMavLink()
-        {
+        {            
             mMavLink.PacketReceived += HandlePacketReceived;
         }
 
@@ -77,7 +79,6 @@ namespace MavLinkNet
             ThreadPool.QueueUserWorkItem(
                 new WaitCallback(ProcessSendQueue));
         }
-
 
         // __ Receive _________________________________________________________
         
@@ -153,7 +154,7 @@ namespace MavLinkNet
         }
 
         private void SendMavlinkMessage(UasMessage msg)
-        {
+        {            
             byte[] buffer = mMavLink.SerializeMessage(msg, MavlinkSystemId, MavlinkComponentId, true);
 
             mSerialPort.Write(buffer, 0, buffer.Length);

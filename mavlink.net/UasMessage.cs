@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 using System;
+
+
 using System.IO;
 using System.Collections.Generic;
 using System.Text;
@@ -36,11 +38,15 @@ namespace MavLinkNet
             protected set; 
         }
 
-        public byte MessageId
+        public uint MessageId
         {
             get { return mMessageId; }
         }
 
+        public virtual uint PacketSize
+        {
+            get { return 0; }
+        }
 
         public UasMessageMetadata GetMetadata()
         {
@@ -58,12 +64,12 @@ namespace MavLinkNet
             
         }
 
-        internal virtual void SerializeBody(BinaryWriter s)
+        internal virtual void SerializeBody(BinaryWriter s, WireProtocolVersion wireProtocolVersion = WireProtocolVersion.v10)
         { 
         
         }
 
-        internal virtual void DeserializeBody(BinaryReader stream)
+        internal virtual void DeserializeBody(BinaryReader stream, WireProtocolVersion wireProtocolVersion = WireProtocolVersion.v10)
         { 
         
         }
@@ -73,8 +79,12 @@ namespace MavLinkNet
 
         }
 
-
+#if MAVLINK_V10
         protected byte mMessageId;
+#else
+        protected uint mMessageId;
+#endif
+
         protected UasMessageMetadata mMetadata;
     }
 
@@ -110,4 +120,10 @@ namespace MavLinkNet
         public string Description;
         public List<string> Params;
     }
+
+    public enum WireProtocolVersion
+    {
+        v10,
+        v20
+    };
 }
