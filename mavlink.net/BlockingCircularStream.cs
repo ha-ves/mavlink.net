@@ -50,13 +50,18 @@ namespace System.IO
             mBuffer = new byte[bufferCapacity];
         }
 
+        public override void Close()
+        {
+            base.Close();
+        }
+
         protected override void Dispose(bool disposing)
         {
-            base.Dispose(disposing);
-
             AbortRead();
 
             mBlockSignal.Dispose();
+
+            base.Dispose(disposing);
         }
 
         public override bool CanRead
@@ -168,7 +173,14 @@ namespace System.IO
         public void AbortRead()
         {
             mReadIsAborted = true;
-            mBlockSignal.Set();
+            try
+            {
+                mBlockSignal.Set();
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
         }
 
         public override int ReadByte()
@@ -199,7 +211,8 @@ namespace System.IO
         public override void Write(byte[] buffer, int offset, int count)
         {
             if (count > mCapacity)
-                throw new IndexOutOfRangeException("Tried to write more bytes than the capacity of the circular buffer.");
+                //throw new IndexOutOfRangeException("Tried to write more bytes than the capacity of the circular buffer.");
+                return;
 
             lock (mAccessLock)
             {
@@ -217,7 +230,8 @@ namespace System.IO
 
                     if (len2 > mReadPosition)
                     {
-                        throw new InternalBufferOverflowException("Data is being overwritten without being read. May need to increase capacity.");
+                        //throw new InternalBufferOverflowException("Data is being overwritten without being read. May need to increase capacity.");
+                        return;
                     }
 
                     CopyBytes(buffer, mBuffer, offset, mWritePosition, len1);

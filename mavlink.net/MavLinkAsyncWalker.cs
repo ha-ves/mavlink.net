@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 
@@ -41,7 +43,6 @@ namespace MavLinkNet
 
         private BlockingCircularStream mProcessStream;
 
-
         public MavLinkAsyncWalker()
         {
             mProcessStream = new BlockingCircularStream(DefaultCircularBufferSize);
@@ -58,14 +59,19 @@ namespace MavLinkNet
             mProcessStream.Write(buffer, 0, buffer.Length);
         }
 
+        public void Dispose()
+        {
+            mProcessStream.Close();
+            mProcessStream.Dispose();
+        }
 
         // __ Impl ____________________________________________________________
-
 
         private void PacketProcessingWorker(object state)
         {
             using (BinaryReader reader = MavLinkPacketBase.GetBinaryReader(mProcessStream))
             {
+                Thread.CurrentThread.Name = "PacketProcessingWorker";
                 while (true)
                 {
                     MavLinkPacketBase packet = null;
@@ -78,13 +84,12 @@ namespace MavLinkNet
 
                         case 0xFD:
                             PacketSignalByte = 0xFD;
-                             packet = MavLinkPacketV20.Deserialize(reader, 0);
+                            packet = MavLinkPacketV20.Deserialize(reader, 0);
                             break;
 
                         default:
-                            break;
+                            return;
                     }
-                    
 
                     if (packet != null && packet.IsValid)
                     {
@@ -103,8 +108,16 @@ namespace MavLinkNet
             byte delimiter = byte.MinValue;
             do
             {
-                // Skip bytes until a packet start is found
-                delimiter = s.ReadByte();
+                try
+                {
+                    // Skip bytes until a packet start is found
+                    delimiter = s.ReadByte();
+                }
+                catch (ObjectDisposedException)
+                {
+                    Debug.WriteLine("SyncStream Walker Exception.\r\n");
+                    return 0;
+                }
             } while (!PacketSignalBytes.Contains(delimiter));
 
             return delimiter;
